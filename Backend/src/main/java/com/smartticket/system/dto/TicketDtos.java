@@ -1,6 +1,7 @@
 package com.smartticket.system.dto;
 
 import com.smartticket.system.model.Priority;
+import com.smartticket.system.model.Role;
 import com.smartticket.system.model.TicketStatus;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -11,7 +12,8 @@ import java.time.LocalDateTime;
 public class TicketDtos {
     public record CreateTicketRequest(
             @NotBlank String title,
-            @NotBlank String description
+            @NotBlank String description,
+            Priority priority
     ) {}
 
     public record UpdateTicketRequest(
@@ -42,4 +44,8 @@ public class TicketDtos {
             LocalDate fromDate,
             LocalDate toDate
     ) {}
+
+    public record AssignTicketRequest(@NotNull Long assignedToUserId) {}
+
+    public record AssigneeOption(Long id, String name, String email, Role role) {}
 }

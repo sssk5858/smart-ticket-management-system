@@ -36,7 +36,7 @@ public class TicketService {
 
     public TicketDtos.TicketResponse createTicket(TicketDtos.CreateTicketRequest request, Authentication auth) {
         User creator = getUserByEmail(auth.getName());
-        Priority priority = detectPriority(request.description());
+        Priority priority = request.priority() != null ? request.priority() : detectPriority(request.description());
         CategoryMapping mapping = detectCategory(request.description());
         User assignee = mapping == null ? null : userRepository.findByRoleAndIsActiveTrue(Role.ADMIN).stream()
                 .findFirst().orElse(null);
@@ -65,7 +65,69 @@ public class TicketService {
     }
 
     public List<TicketDtos.TicketResponse> getAssignedTickets(Authentication auth) {
-        return ticketRepository.findByAssignedTo(getUserByEmail(auth.getName())).stream().map(this::markOverdueAndMap).toList();
+        User user = getUserByEmail(auth.getName());
+        if (user.getRole() == Role.SUPER_ADMIN) {
+            return ticketRepository.findAll().stream()
+                    .sorted(Comparator.comparing(Ticket::getCreatedAt).reversed())
+                    .map(this::markOverdueAndMap)
+                    .toList();
+        }
+        return ticketRepository.findByAssignedTo(user).stream().map(this::markOverdueAndMap).toList();
+    }
+
+    public TicketDtos.TicketResponse getTicketForUser(Long id, Authentication auth) {
+        User user = getUserByEmail(auth.getName());
+        Ticket ticket = ticketRepository.findById(id).orElseThrow(() -> new ApiException("Ticket not found"));
+        if (ticket.getCreatedBy() == null || !ticket.getCreatedBy().getId().equals(user.getId())) {
+            throw new ApiException("Ticket not found");
+        }
+        return markOverdueAndMap(ticket);
+    }
+
+    public TicketDtos.TicketResponse getTicketForAdmin(Long id, Authentication auth) {
+        Ticket ticket = ticketRepository.findById(id).orElseThrow(() -> new ApiException("Ticket not found"));
+        User user = getUserByEmail(auth.getName());
+        if (user.getRole() == Role.SUPER_ADMIN) {
+            return markOverdueAndMap(ticket);
+        }
+        if (user.getRole() == Role.ADMIN) {
+            if (ticket.getAssignedTo() != null && ticket.getAssignedTo().getId().equals(user.getId())) {
+                return markOverdueAndMap(ticket);
+            }
+            throw new ApiException("Ticket not found");
+        }
+        throw new ApiException("Forbidden");
+    }
+
+    public List<TicketDtos.AssigneeOption> getAssigneeOptions() {
+        return userRepository.findAll().stream()
+                .filter(u -> u.isActive() && (u.getRole() == Role.ADMIN || u.getRole() == Role.SUPER_ADMIN))
+                .sorted(Comparator.comparing(User::getName, String.CASE_INSENSITIVE_ORDER))
+                .map(u -> new TicketDtos.AssigneeOption(u.getId(), u.getName(), u.getEmail(), u.getRole()))
+                .toList();
+    }
+
+    public TicketDtos.TicketResponse assignTicket(Long id, TicketDtos.AssignTicketRequest request, Authentication auth) {
+        User actor = getUserByEmail(auth.getName());
+        if (actor.getRole() != Role.ADMIN && actor.getRole() != Role.SUPER_ADMIN) {
+            throw new ApiException("Forbidden");
+        }
+        Ticket ticket = ticketRepository.findById(id).orElseThrow(() -> new ApiException("Ticket not found"));
+        User assignee = userRepository.findById(request.assignedToUserId()).orElseThrow(() -> new ApiException("User not found"));
+        if (!assignee.isActive()) {
+            throw new ApiException("User is not active");
+        }
+        if (assignee.getRole() != Role.ADMIN && assignee.getRole() != Role.SUPER_ADMIN) {
+            throw new ApiException("Tickets can only be assigned to admin accounts");
+        }
+        ticket.setAssignedTo(assignee);
+        if (ticket.getStatus() == TicketStatus.OPEN) {
+            ticket.setStatus(TicketStatus.ASSIGNED);
+        }
+        ticket.setUpdatedAt(LocalDateTime.now());
+        ticketRepository.save(ticket);
+        auditService.log(ticket.getId(), "TICKET_ASSIGNED", auth.getName());
+        return markOverdueAndMap(ticket);
     }
 
     public TicketDtos.TicketResponse updateStatus(Long id, TicketDtos.UpdateTicketRequest request, Authentication auth) {
@@ -87,6 +149,9 @@ public class TicketService {
             if (filter.assignedTo() != null) predicates.add(cb.equal(root.get("assignedTo").get("id"), filter.assignedTo()));
             if (filter.fromDate() != null) predicates.add(cb.greaterThanOrEqualTo(root.get("createdAt"), filter.fromDate().atStartOfDay()));
             if (filter.toDate() != null) predicates.add(cb.lessThanOrEqualTo(root.get("createdAt"), filter.toDate().atTime(23, 59, 59)));
+            if (predicates.isEmpty()) {
+                return cb.conjunction();
+            }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
         return ticketRepository.findAll(specification).stream().sorted(Comparator.comparing(Ticket::getCreatedAt).reversed()).map(this::markOverdueAndMap).toList();

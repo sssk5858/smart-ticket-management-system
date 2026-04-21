@@ -5,7 +5,9 @@ import com.smartticket.system.model.CategoryMapping;
 import com.smartticket.system.model.SlaConfig;
 import com.smartticket.system.service.AdminService;
 import jakarta.validation.Valid;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -29,6 +31,22 @@ public class SuperAdminController {
     @PatchMapping("/users/{id}")
     public AdminDtos.UserResponse updateUser(@PathVariable Long id, @Valid @RequestBody AdminDtos.UserRoleUpdateRequest request) {
         return adminService.updateUser(id, request);
+    }
+
+    @PostMapping("/users")
+    public AdminDtos.UserResponse createUser(@Valid @RequestBody AdminDtos.UserCreateRequest request) {
+        return adminService.createUser(request);
+    }
+
+    @PutMapping("/users/{id}")
+    public AdminDtos.UserResponse updateUserDetails(@PathVariable Long id, @RequestBody AdminDtos.UserUpdateRequest request, Authentication authentication) {
+        return adminService.updateUserDetails(id, request, authentication.getName());
+    }
+
+    @DeleteMapping("/users/{id}")
+    public ResponseEntity<Void> deleteUser(@PathVariable Long id, Authentication authentication) {
+        adminService.deleteUser(id, authentication.getName());
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/sla")
